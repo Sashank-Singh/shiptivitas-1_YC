@@ -10,9 +10,9 @@ export default class Board extends React.Component {
     const clients = this.getClients();
     this.state = {
       clients: {
-        backlog: clients.filter(client => !client.status || client.status === 'backlog'),
-        inProgress: clients.filter(client => client.status && client.status === 'in-progress'),
-        complete: clients.filter(client => client.status && client.status === 'complete'),
+        backlog: clients.map(client => ({ ...client, status: 'backlog' })),
+        inProgress: [],
+        complete: [],
       }
     }
     this.swimlanes = {
@@ -20,6 +20,89 @@ export default class Board extends React.Component {
       inProgress: React.createRef(),
       complete: React.createRef(),
     }
+  }
+
+  componentDidMount() {
+    this.setupDragula();
+  }
+
+  componentWillUnmount() {
+    this.destroyDragula();
+  }
+
+  setupDragula() {
+    this.destroyDragula();
+    this.drake = Dragula([
+      this.swimlanes.backlog.current,
+      this.swimlanes.inProgress.current,
+      this.swimlanes.complete.current,
+    ]);
+    this.drake.on('drop', this.onDrop);
+  }
+
+  destroyDragula() {
+    if (this.drake) {
+      this.drake.destroy();
+      this.drake = null;
+    }
+  }
+
+  getLaneKey(container) {
+    if (container === this.swimlanes.backlog.current) return 'backlog';
+    if (container === this.swimlanes.inProgress.current) return 'inProgress';
+    if (container === this.swimlanes.complete.current) return 'complete';
+    return null;
+  }
+
+  onDrop = (el, target, source, sibling) => {
+    if (!target || !source) return;
+
+    const targetLane = this.getLaneKey(target);
+    const sourceLane = this.getLaneKey(source);
+    if (!targetLane || !sourceLane) return;
+
+    const statusByLane = {
+      backlog: 'backlog',
+      inProgress: 'in-progress',
+      complete: 'complete',
+    };
+
+    const id = el.getAttribute('data-id');
+    const newClients = {
+      backlog: [...this.state.clients.backlog],
+      inProgress: [...this.state.clients.inProgress],
+      complete: [...this.state.clients.complete],
+    };
+
+    let movedClient;
+    newClients[sourceLane] = newClients[sourceLane].filter(client => {
+      if (client.id === id) {
+        movedClient = client;
+        return false;
+      }
+      return true;
+    });
+
+    if (!movedClient) return;
+
+    movedClient = { ...movedClient, status: statusByLane[targetLane] };
+
+    const targetList = newClients[targetLane];
+    const insertBeforeId = sibling && sibling.getAttribute('data-id');
+
+    if (!insertBeforeId) {
+      targetList.push(movedClient);
+    } else {
+      const index = targetList.findIndex(client => client.id === insertBeforeId);
+      targetList.splice(index >= 0 ? index : targetList.length, 0, movedClient);
+    }
+
+    // Revert Dragula's DOM mutation, then let React render the new order.
+    this.drake.cancel(true);
+
+    this.setState({ clients: newClients }, () => {
+      this.setupDragula();
+    });
   }
   getClients() {
     return [
